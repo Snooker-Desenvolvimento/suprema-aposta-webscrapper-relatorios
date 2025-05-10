@@ -1,0 +1,4 @@
+# Executar às 00:05 todos os dias
+5 0 * * * cd /app && python3 scraper.py
+
+# Linha em branco necessária no final do arquivo 

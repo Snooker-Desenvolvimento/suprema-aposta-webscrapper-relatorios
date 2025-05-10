@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  scraper:
+    build: .
+    volumes:
+      - ./logs:/app/logs
+    env_file: .env
+    tty: true
+    restart: always
+    labels:
+      - "com.docker.compose.project=admin"
+      - "com.docker.compose.service=webscrapper-relatorios"
+      - "traefik.enable=false"
+      - "portainer.description=Coletor automático de relatórios do Suprema Aposta"
+      - "portainer.schedule=0 5 * * * *"  # Agendamento às 00:05
+
+
+ 
