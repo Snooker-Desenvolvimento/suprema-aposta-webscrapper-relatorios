@@ -249,22 +249,26 @@ def process_and_upload_to_bigquery(bq_client: Client) -> bool:
             
             logger.info(f"Processando arquivo {csv_file.name} para tabela {table_name}")
             
-            # Ler CSV para DataFrame
-            df = pd.read_csv(csv_file)
+            # Ler CSV para DataFrame, forçando todos os campos como string
+            df = pd.read_csv(csv_file, dtype=str)
+            
+            # Criar schema com todos os campos como STRING
+            schema = [bigquery.SchemaField(col, "STRING") for col in df.columns]
             
             # Converter para formato Parquet
             parquet_file = TEMP_DIR / f"{table_name}.parquet"
             
-            # Converter para PyArrow Table para melhor inferência de tipos
+            # Converter para PyArrow Table - o pandas já mantém os tipos string
             table = pa.Table.from_pandas(df)
             
             # Salvar em formato Parquet
             pq.write_table(table, parquet_file)
             
-            # Configurar job de carregamento
+            # Configurar job de carregamento com schema explícito
             job_config = bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.PARQUET,
-                write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                schema=schema  # Define explicitamente todos os campos como STRING
             )
             
             # Carregar dados para o BigQuery
@@ -337,3 +341,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main() 
+

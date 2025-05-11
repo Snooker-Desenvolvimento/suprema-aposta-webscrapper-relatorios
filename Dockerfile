@@ -22,19 +22,13 @@ RUN chmod 400 /app/gcp-key.json
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt 
 
 # Copy the scraper script and make it executable
-COPY scraper.py .
+COPY scraper.py cronjob ./
 RUN chmod +x scraper.py
 
 # Add crontab file
-COPY crontab /etc/cron.d/scraper-cron
-RUN chmod 0644 /etc/cron.d/scraper-cron && \
-  crontab /etc/cron.d/scraper-cron
+RUN crontab cronjob
 
-# Script to start both cron and keep container running
-COPY start.sh .
-RUN chmod +x start.sh
-
-CMD ["./start.sh"]
+CMD ["cron", "-f"]
