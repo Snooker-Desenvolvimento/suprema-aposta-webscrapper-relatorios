@@ -28,12 +28,13 @@ load_dotenv()
 
 # Constantes
 LOGIN_URL = "https://afiliado.supremaposta.com/login"
-REPORT_TYPES = [
-    "Relatório de Mídia",
-    "Relatório de Registros",
-    "Relatório de Ganhos",
-    "Relatório de atividades"
-]
+REPORT_URLS = {
+    "Relatório de Mídia": "https://afiliado.supremaposta.com/partner/reports/media",
+    "Relatório de Registros": "https://afiliado.supremaposta.com/partner/reports/registration",
+    "Relatório de Ganhos": "https://afiliado.supremaposta.com/partner/reports/earnings",
+    "Relatório de atividades": "https://afiliado.supremaposta.com/partner/reports/activity"
+}
+REPORT_TYPES = list(REPORT_URLS.keys())
 
 TABLE_MAPPING = {
     'data.csv': 'midia',           # Arquivo data.csv vai para tabela mídia
@@ -161,28 +162,94 @@ def login(driver: webdriver.Chrome) -> bool:
         logger.error(f"Falha no login: {e}")
         raise
 
-def download_reports(driver: webdriver.Chrome, date_range: str = "Ontem") -> bool:
-    """Baixa todos os relatórios disponíveis."""
+def process_single_report(bq_client: Client, report_type: str) -> bool:
+    """Processa um único relatório e envia para o BigQuery."""
     try:
-        wait = WebDriverWait(driver, 10)
+        # Determinar qual arquivo CSV corresponde a qual relatório
+        csv_files = list(TEMP_DIR.glob("data*.csv"))
+        if not csv_files:
+            logger.error(f"Nenhum arquivo CSV encontrado para {report_type}")
+            return False
+            
+        csv_file = sorted(csv_files)[0]  # Pega o arquivo mais recente
+        table_name = TABLE_MAPPING[csv_file.name]
+        table_id = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_PREFIX}{table_name}"
         
-        driver.find_element(By.ID, "mobileToggle").click()
-        time.sleep(0.5)
-        driver.find_element(By.LINK_TEXT, "Relatórios").click()
-        time.sleep(0.5)
+        logger.info(f"Processando arquivo {csv_file.name} para tabela {table_name}")
         
-        for report_type in REPORT_TYPES:
-            if not download_single_report(driver, wait, report_type, date_range):
-                return False
+        # Ler CSV para DataFrame, forçando todos os campos como string
+        df = pd.read_csv(csv_file, dtype=str)
         
-        logger.info("Todos os relatórios foram baixados com sucesso")
+        # Criar schema com todos os campos como STRING
+        schema = [bigquery.SchemaField(col, "STRING") for col in df.columns]
+        
+        # Converter para formato Parquet
+        parquet_file = TEMP_DIR / f"{table_name}.parquet"
+        
+        # Converter para PyArrow Table
+        table = pa.Table.from_pandas(df)
+        
+        # Salvar em formato Parquet
+        pq.write_table(table, parquet_file)
+        
+        # Configurar job de carregamento com schema explícito
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.PARQUET,
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            schema=schema
+        )
+        
+        # Carregar dados para o BigQuery
+        with open(parquet_file, "rb") as source_file:
+            load_job = bq_client.load_table_from_file(
+                source_file,
+                table_id,
+                job_config=job_config
+            )
+            load_job.result()
+        
+        logger.info(f"Arquivo {csv_file.name} enviado para {table_id}")
+        
+        # Limpar arquivos temporários
+        csv_file.unlink()
+        parquet_file.unlink()
+        
         return True
         
     except Exception as e:
-        logger.error(f"Erro ao baixar relatórios: {e}")
+        logger.error(f"Erro ao processar e enviar arquivo {report_type}: {e}")
         return False
 
-@retry_on_error(max_attempts=5, delay=1*60)
+def download_reports(driver: webdriver.Chrome, bq_client: Client, date_range: str = "Ontem") -> bool:
+    """Baixa e processa todos os relatórios disponíveis."""
+    try:
+        wait = WebDriverWait(driver, 10)
+        
+        for report_type in REPORT_TYPES:
+            # Baixar o relatório
+            if not download_single_report(driver, wait, report_type, date_range):
+                return False
+                
+            # Processar e enviar para o BigQuery
+            if not process_single_report(bq_client, report_type):
+                return False
+            
+            logger.info(f"Relatório {report_type} processado e enviado com sucesso")
+            
+            for file in TEMP_DIR.glob("*"):
+                try:
+                    file.unlink()
+                except Exception as e:
+                    logger.warning(f"Não foi possível excluir {file}: {e}")
+        
+        logger.info("Todos os relatórios foram processados e enviados com sucesso")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Erro ao processar relatórios: {e}")
+        return False
+
+@retry_on_error(max_attempts=5, delay=15)
 def download_single_report(
     driver: webdriver.Chrome,
     wait: WebDriverWait,
@@ -191,8 +258,10 @@ def download_single_report(
 ) -> bool:
     """Baixa um tipo específico de relatório."""
     try:
-        driver.find_element(By.LINK_TEXT, report_type).click()
-        time.sleep(0.5)
+        # Navegar diretamente para a URL do relatório
+        report_url = REPORT_URLS[report_type]
+        driver.get(report_url)
+        time.sleep(2)
         
         select = Select(driver.find_element(By.TAG_NAME, "select"))
         select.select_by_visible_text(date_range)
@@ -218,78 +287,11 @@ def download_single_report(
         export_button.click()
         time.sleep(10)
         
-        driver.find_element(By.ID, "mobileToggle").click()
-        time.sleep(0.5)
-        driver.find_element(By.LINK_TEXT, "Relatórios").click()
-        time.sleep(0.5)
-        
         logger.info(f"Relatório {report_type} baixado com sucesso")
         return True
         
     except Exception as e:
         logger.error(f"Erro ao baixar {report_type}: {e}")
-        raise
-
-@retry_on_error(max_attempts=5, delay=30)
-def process_and_upload_to_bigquery(bq_client: Client) -> bool:
-    """Processa arquivos CSV baixados e envia para o BigQuery."""
-    try:
-        csv_files = list(TEMP_DIR.glob("data*.csv"))
-        
-        if len(csv_files) != 4:
-            raise ValueError(f"Esperados 4 arquivos CSV, encontrados {len(csv_files)}")
-        
-        # Ordenar arquivos para garantir a ordem correta
-        csv_files.sort()
-        
-        for i, csv_file in enumerate(csv_files):
-            # Usar o mapeamento correto para as tabelas
-            table_name = TABLE_MAPPING[csv_file.name]
-            table_id = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_PREFIX}{table_name}"
-            
-            logger.info(f"Processando arquivo {csv_file.name} para tabela {table_name}")
-            
-            # Ler CSV para DataFrame, forçando todos os campos como string
-            df = pd.read_csv(csv_file, dtype=str)
-            
-            # Criar schema com todos os campos como STRING
-            schema = [bigquery.SchemaField(col, "STRING") for col in df.columns]
-            
-            # Converter para formato Parquet
-            parquet_file = TEMP_DIR / f"{table_name}.parquet"
-            
-            # Converter para PyArrow Table - o pandas já mantém os tipos string
-            table = pa.Table.from_pandas(df)
-            
-            # Salvar em formato Parquet
-            pq.write_table(table, parquet_file)
-            
-            # Configurar job de carregamento com schema explícito
-            job_config = bigquery.LoadJobConfig(
-                source_format=bigquery.SourceFormat.PARQUET,
-                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-                schema=schema  # Define explicitamente todos os campos como STRING
-            )
-            
-            # Carregar dados para o BigQuery
-            with open(parquet_file, "rb") as source_file:
-                load_job = bq_client.load_table_from_file(
-                    source_file,
-                    table_id,
-                    job_config=job_config
-                )
-                load_job.result()
-            
-            logger.info(f"Arquivo {csv_file.name} enviado para {table_id}")
-            
-            # Limpar arquivos temporários
-            csv_file.unlink()
-            parquet_file.unlink()
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Erro ao processar e enviar arquivos: {e}")
         raise
 
 def cleanup(driver: Optional[webdriver.Chrome], temp_dir: Path) -> None:
@@ -324,10 +326,7 @@ def main() -> None:
         if not login(driver):
             return
         
-        if not download_reports(driver):
-            return
-        
-        if not process_and_upload_to_bigquery(bq_client):
+        if not download_reports(driver, bq_client):
             return
         
         logger.info("Coleta e envio de dados concluídos com sucesso")
