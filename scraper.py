@@ -179,6 +179,41 @@ def rename_downloaded_file(report_type: str) -> Optional[str]:
         logger.error(f"Erro ao renomear arquivo: {e}")
         return None
 
+def navigate_to_report(driver: webdriver.Chrome, wait: WebDriverWait, report_type: str) -> bool:
+    try:
+        # Scroll to top first
+        driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(0.5)
+        
+        # Open menu
+        mobile_toggle = wait.until(
+            EC.element_to_be_clickable((By.ID, "mobileToggle"))
+        )
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", mobile_toggle)
+        time.sleep(0.5)
+        mobile_toggle.click()
+        
+        # Click Relatórios
+        reports_link = wait.until(
+            EC.element_to_be_clickable((By.LINK_TEXT, "Relatórios"))
+        )
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", reports_link)
+        time.sleep(0.5)
+        reports_link.click()
+        
+        # Click specific report
+        report_link = wait.until(
+            EC.element_to_be_clickable((By.LINK_TEXT, report_type))
+        )
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", report_link)
+        time.sleep(0.5)
+        report_link.click()
+        
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao navegar para {report_type}: {e}")
+        return False
+
 @retry_on_error(max_attempts=5, delay=1*15)
 def download_single_report(
     driver: webdriver.Chrome,
@@ -187,12 +222,6 @@ def download_single_report(
     date_range: str
 ) -> bool:
     try:
-        existing_files = set(f for f in os.listdir(TEMP_DIR) if f.endswith('.csv'))
-        
-        report_link = WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable((By.LINK_TEXT, report_type))
-        )
-        report_link.click()
         
         select_element = wait.until(EC.presence_of_element_located((By.TAG_NAME, "select")))
         Select(select_element).select_by_visible_text(date_range)
@@ -209,7 +238,7 @@ def download_single_report(
         export_buttons = driver.find_elements(By.XPATH, "//button[contains(text(), 'Exportar relatório')]")
         if not export_buttons:
             logger.info(f"Nenhum dado disponível para {report_type}")
-            return navigate_back_to_reports(driver, wait)
+            return True
         
         export_button = WebDriverWait(driver, 30).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Exportar relatório')]"))
@@ -219,11 +248,13 @@ def download_single_report(
         
         # Wait for file to be downloaded with a longer timeout
         download_wait = WebDriverWait(driver, 2*60)
+        existing_files = set(f for f in os.listdir(TEMP_DIR) if f.endswith('.csv'))
+        
         try:
             download_wait.until(lambda x: new_file_downloaded(x, existing_files))
             logger.info(f"Download concluído para {report_type}")
         except Exception as e:
-            logger.error(f"Timeout aguardando download do arquivo para {report_type}: {e}")
+            logger.error(f"Erro aguardando download do arquivo para {report_type}: {e}")
             return False
         
         # Additional wait to ensure file is ready
@@ -233,7 +264,7 @@ def download_single_report(
             logger.error(f"Falha ao renomear arquivo para {report_type}")
             return False
             
-        return navigate_back_to_reports(driver, wait)
+        return True
         
     except TimeoutException as e:
         logger.error(f"Timeout ao baixar {report_type}: {e}")
@@ -242,40 +273,14 @@ def download_single_report(
         logger.error(f"Erro ao baixar {report_type}: {e}")
         raise
 
-def navigate_back_to_reports(driver: webdriver.Chrome, wait: WebDriverWait) -> bool:
-    try:
-        # Scroll to top first
-        driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(0.5)  # Let the scroll complete
-        
-        # Find and click mobile toggle
-        mobile_toggle = wait.until(
-            EC.element_to_be_clickable((By.ID, "mobileToggle"))
-        )
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", mobile_toggle)
-        time.sleep(0.5)  # Let the scroll complete
-        mobile_toggle.click()
-        
-        # Find and click reports link
-        reports_link = wait.until(
-            EC.element_to_be_clickable((By.LINK_TEXT, "Relatórios"))
-        )
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", reports_link)
-        time.sleep(0.5)  # Let the scroll complete
-        reports_link.click()
-        
-        return True
-    except Exception as e:
-        logger.error(f"Erro ao navegar de volta para relatórios: {e}")
-        return False
-
 def download_reports(driver: webdriver.Chrome, date_range: str = "Ontem") -> bool:
     wait = WebDriverWait(driver, 10)
     
-    driver.find_element(By.ID, "mobileToggle").click()
-    driver.find_element(By.LINK_TEXT, "Relatórios").click()
-    
     for report_type in REPORT_TYPES:
+        # Navigate to report and download it
+        if not navigate_to_report(driver, wait, report_type):
+            return False
+            
         if not download_single_report(driver, wait, report_type, date_range):
             return False
     
