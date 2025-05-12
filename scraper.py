@@ -28,19 +28,18 @@ load_dotenv()
 
 # Constantes
 LOGIN_URL = "https://afiliado.supremaposta.com/login"
-REPORT_URLS = {
-    "Relatório de Mídia": "https://afiliado.supremaposta.com/partner/reports/media",
-    "Relatório de Registros": "https://afiliado.supremaposta.com/partner/reports/registration",
-    "Relatório de Ganhos": "https://afiliado.supremaposta.com/partner/reports/earnings",
-    "Relatório de atividades": "https://afiliado.supremaposta.com/partner/reports/activity"
-}
-REPORT_TYPES = list(REPORT_URLS.keys())
+REPORT_TYPES = [
+    "Relatório de Mídia",
+    "Relatório de Registros",
+    "Relatório de Ganhos",
+    "Relatório de atividades"
+]
 
 TABLE_MAPPING = {
-    'data.csv': 'midia',           # Arquivo data.csv vai para tabela mídia
-    'data (1).csv': 'registros',   # Arquivo data (1).csv vai para tabela registros
-    'data (2).csv': 'ganhos',      # Arquivo data (2).csv vai para tabela ganhos
-    'data (3).csv': 'atividades'   # Arquivo data (3).csv vai para tabela atividades
+    "Relatório de Mídia": "midia",
+    "Relatório de Registros": "registros",
+    "Relatório de Ganhos": "ganhos",
+    "Relatório de atividades": "atividades"
 }
 
 LOGS_DIR = Path("/app/logs")
@@ -172,7 +171,7 @@ def process_single_report(bq_client: Client, report_type: str) -> bool:
             return False
             
         csv_file = sorted(csv_files)[0]  # Pega o arquivo mais recente
-        table_name = TABLE_MAPPING[csv_file.name]
+        table_name = TABLE_MAPPING[report_type]  # Usar o report_type para determinar a tabela
         table_id = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_PREFIX}{table_name}"
         
         logger.info(f"Processando arquivo {csv_file.name} para tabela {table_name}")
@@ -225,6 +224,12 @@ def download_reports(driver: webdriver.Chrome, bq_client: Client, date_range: st
     try:
         wait = WebDriverWait(driver, 10)
         
+        # Navegar para a página de relatórios
+        driver.find_element(By.ID, "mobileToggle").click()
+        time.sleep(0.5)
+        driver.find_element(By.LINK_TEXT, "Relatórios").click()
+        time.sleep(0.5)
+        
         for report_type in REPORT_TYPES:
             # Baixar o relatório
             if not download_single_report(driver, wait, report_type, date_range):
@@ -241,11 +246,18 @@ def download_reports(driver: webdriver.Chrome, bq_client: Client, date_range: st
                     file.unlink()
                 except Exception as e:
                     logger.warning(f"Não foi possível excluir {file}: {e}")
+            
+            # Voltar para a página de relatórios para o próximo relatório
+            driver.find_element(By.ID, "mobileToggle").click()
+            time.sleep(0.5)
+            driver.find_element(By.LINK_TEXT, "Relatórios").click()
+            time.sleep(0.5)
         
         logger.info("Todos os relatórios foram processados e enviados com sucesso")
         return True
         
     except Exception as e:
+        print(e)
         logger.error(f"Erro ao processar relatórios: {e}")
         return False
 
@@ -258,9 +270,8 @@ def download_single_report(
 ) -> bool:
     """Baixa um tipo específico de relatório."""
     try:
-        # Navegar diretamente para a URL do relatório
-        report_url = REPORT_URLS[report_type]
-        driver.get(report_url)
+        # Clicar no link do relatório
+        driver.find_element(By.LINK_TEXT, report_type).click()
         time.sleep(2)
         
         select = Select(driver.find_element(By.TAG_NAME, "select"))
@@ -291,6 +302,7 @@ def download_single_report(
         return True
         
     except Exception as e:
+        print(e)
         logger.error(f"Erro ao baixar {report_type}: {e}")
         raise
 
