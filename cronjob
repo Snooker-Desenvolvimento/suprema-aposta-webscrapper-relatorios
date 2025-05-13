@@ -1,4 +1,4 @@
 # Executar todo dia as 00:05
-* * * * * set -a && . /app/.env && set +a &&  cd /app && /usr/local/bin/python3 scraper.py >> /app/logs/cron.log 2>&1
+15 0 * * * cd /app && /usr/local/bin/python3 scraper.py >> /app/logs/cron.log 2>&1
 
 # Linha em branco necessária no final do arquivo  
