@@ -27,6 +27,15 @@ from time import sleep
 
 load_dotenv()
 
+# Log environment variables for debugging
+logger.info("Environment variables:")
+logger.info(f"USERNAME set: {'USERNAME' in os.environ}")
+logger.info(f"PASSWORD set: {'PASSWORD' in os.environ}")
+logger.info(f"GCP_PROJECT_ID: {os.getenv('GCP_PROJECT_ID')}")
+logger.info(f"BQ_DATASET_ID: {os.getenv('BQ_DATASET_ID')}")
+logger.info(f"GOOGLE_APPLICATION_CREDENTIALS: {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}")
+logger.info(f"Current working directory: {os.getcwd()}")
+
 LOGIN_URL = "https://afiliado.supremaposta.com/login"
 REPORT_TYPES = [
     "Relatório de Mídia",
