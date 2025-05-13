@@ -13,12 +13,12 @@ WORKDIR /app
 RUN mkdir -p /app/data /app/logs && \
   chmod -R 755 /app
 
-# Copy GCP credentials
-COPY gcp-key.json /app/gcp-key.json
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
+COPY gcp-key.json .
+COPY .env .
 
 # Set proper permissions for the key file
-RUN chmod 400 /app/gcp-key.json
+RUN chmod 400 gcp-key.json && \
+  chmod 600 .env
 
 # Install Python dependencies
 COPY requirements.txt .
